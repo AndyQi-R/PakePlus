@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>三维立体方块拼图 - 无限制视角 | 渐变光影 | 六列结构（列6镂空）</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        }
+        /* 确保没有任何文字标签显示 */
+        .css2d-label {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- 纯净三维演示，无任何文字 -->
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 初始化场景 (渐变光影增强) ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050b1a);
+        scene.fog = new THREE.FogExp2(0x050b1a, 0.006);
+
+        // 相机视角
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(7, 6.5, 10);
+        camera.lookAt(0, 3.8, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // ========= 渐变光影渲染增强 =========
+        // 半球光 (上蓝下暖)
+        const hemiLight = new THREE.HemisphereLight(0x6c7eff, 0xffaa66, 0.7);
+        scene.add(hemiLight);
+        
+        // 主光源方向光
+        const dirLight = new THREE.DirectionalLight(0xffeebb, 1.2);
+        dirLight.position.set(3, 6, 2.5);
+        dirLight.castShadow = true;
+        dirLight.receiveShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 15;
+        dirLight.shadow.camera.left = -6;
+        dirLight.shadow.camera.right = 6;
+        dirLight.shadow.camera.top = 6;
+        dirLight.shadow.camera.bottom = -6;
+        scene.add(dirLight);
+        
+        // 辅助背光 (冷紫色)
+        const backLight = new THREE.PointLight(0xaa88ff, 0.55);
+        backLight.position.set(-2, 3, -4);
+        scene.add(backLight);
+        
+        // 动态彩色点光源
+        const movingLight = new THREE.PointLight(0xff66aa, 0.5);
+        movingLight.position.set(2, 2, 3);
+        scene.add(movingLight);
+        
+        const movingLight2 = new THREE.PointLight(0x44aaff, 0.45);
+        movingLight2.position.set(-1.5, 4, 2);
+        scene.add(movingLight2);
+        
+        // 底部暖色填充光
+        const fillLight = new THREE.PointLight(0xff9966, 0.4);
+        fillLight.position.set(0, -1, 1);
+        scene.add(fillLight);
+        
+        // 环境光
+        const ambientLight = new THREE.AmbientLight(0x3a3a5a, 0.55);
+        scene.add(ambientLight);
+        
+        // 地面阴影接收平面
+        const groundPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(14, 14),
+            new THREE.ShadowMaterial({ opacity: 0.35, color: 0x000000, transparent: true, side: THREE.DoubleSide })
+        );
+        groundPlane.rotation.x = -Math.PI / 2;
+        groundPlane.position.y = -0.8;
+        groundPlane.receiveShadow = true;
+        scene.add(groundPlane);
+        
+        // 装饰性半透地面 (增强光泽)
+        const glossyFloor = new THREE.Mesh(
+            new THREE.PlaneGeometry(12, 12),
+            new THREE.MeshStandardMaterial({ color: 0x2266aa, metalness: 0.7, roughness: 0.4, transparent: true, opacity: 0.08 })
+        );
+        glossyFloor.rotation.x = -Math.PI / 2;
+        glossyFloor.position.y = -0.79;
+        scene.add(glossyFloor);
+        
+        // 极简网格参考线 (无数字，极淡)
+        const gridHelper = new THREE.GridHelper(14, 28, 0x88aaff, 0x446688);
+        gridHelper.position.y = -0.75;
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.2;
+        scene.add(gridHelper);
+        
+        // ========= 参数配置 =========
+        // 原始边长0.94，增大1/2 => 新边长 = 0.94 * 1.5 = 1.41
+        const blockSize = 1.41;
+        const gap = 1.45; // 间距，保持视觉舒适
+        
+        // 颜色定义
+        const mainBlue = 0x3a86ff;      // 列1-4
+        const attachGreen = 0x2ecc71;   // L4, R2
+        const coralColor = 0xff6d5a;    // 列5, L6,R6,U6 及它们的前方块
+        
+        // 创建带边框的方块
+        function createBlock(color, x, y, z, emissiveIntensity = 0.1, metalnessVal = 0.4) {
+            const material = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.25,
+                metalness: metalnessVal,
+                emissive: color,
+                emissiveIntensity: emissiveIntensity,
+                flatShading: false
+            });
+            const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(x, y, z);
+            cube.castShadow = true;
+            cube.receiveShadow = true;
+            
+            // 白色边框线
+            const edgesGeo = new THREE.EdgesGeometry(geometry);
+            const edgesMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 });
+            const wireframe = new THREE.LineSegments(edgesGeo, edgesMat);
+            cube.add(wireframe);
+            return cube;
+        }
+        
+        const allBlocks = [];
+        const g = gap;
+        
+        // 1. 主列 1~5 (列6镂空)
+        const mainPositions = [
+            { yIdx: 0, color: mainBlue, emissive: 0.08 },  // 列1
+            { yIdx: 1, color: mainBlue, emissive: 0.08 },  // 列2
+            { yIdx: 2, color: mainBlue, emissive: 0.08 },  // 列3
+            { yIdx: 3, color: mainBlue, emissive: 0.08 },  // 列4
+            { yIdx: 4, color: coralColor, emissive: 0.12 } // 列5
+        ];
+        
+        mainPositions.forEach(pos => {
+            const y = pos.yIdx * g;
+            const block = createBlock(pos.color, 0, y, 0, pos.emissive, 0.38);
+            scene.add(block);
+            allBlocks.push(block);
+        });
+        
+        // 2. L4: 列4左侧
+        const l4 = createBlock(attachGreen, -g, 3*g, 0, 0.13, 0.45);
+        scene.add(l4);
+        allBlocks.push(l4);
+        
+        // 3. R2: 列2右侧
+        const r2 = createBlock(attachGreen, g, 1*g, 0, 0.13, 0.45);
+        scene.add(r2);
+        allBlocks.push(r2);
+        
+        // 4. 列6附加块 (主块镂空)
+        const l6 = createBlock(coralColor, -g, 5*g, 0, 0.15, 0.42);
+        scene.add(l6);
+        allBlocks.push(l6);
+        
+        const r6 = createBlock(coralColor, g, 5*g, 0, 0.15, 0.42);
+        scene.add(r6);
+        allBlocks.push(r6);
+        
+        const u6 = createBlock(coralColor, 0, 6*g, 0, 0.15, 0.42);
+        scene.add(u6);
+        allBlocks.push(u6);
+        
+        // 5. 正前方附加块 (列5、R6、U6、L6前方)
+        const frontOffsetZ = g;
+        
+        const col5Front = createBlock(coralColor, 0, 4*g, frontOffsetZ, 0.16, 0.45);
+        scene.add(col5Front);
+        allBlocks.push(col5Front);
+        
+        const r6Front = createBlock(coralColor, g, 5*g, frontOffsetZ, 0.16, 0.45);
+        scene.add(r6Front);
+        allBlocks.push(r6Front);
+        
+        const u6Front = createBlock(coralColor, 0, 6*g, frontOffsetZ, 0.16, 0.45);
+        scene.add(u6Front);
+        allBlocks.push(u6Front);
+        
+        const l6Front = createBlock(coralColor, -g, 5*g, frontOffsetZ, 0.16, 0.45);
+        scene.add(l6Front);
+        allBlocks.push(l6Front);
+        
+        // 点缀粒子氛围 (不影响方块结构)
+        const particleCount = 400;
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        for (let i = 0; i < particleCount; i++) {
+            particlePositions[i*3] = (Math.random() - 0.5) * 20;
+            particlePositions[i*3+1] = (Math.random() - 0.5) * 9 + 2;
+            particlePositions[i*3+2] = (Math.random() - 0.5) * 15 - 5;
+        }
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        const particleMat = new THREE.PointsMaterial({ color: 0x88aaff, size: 0.06, transparent: true, opacity: 0.3 });
+        const stars = new THREE.Points(particleGeo, particleMat);
+        scene.add(stars);
+        
+        // ========= 动画与动态光影渐变 =========
+        let time = 0;
+        const breathBlocks = [l4, r2, l6, r6, u6, col5Front, r6Front, u6Front, l6Front];
+        const mainBlocks = allBlocks.filter(b => Math.abs(b.position.x) < 0.1 && b.position.y < 4.8 * g && b.position.z === 0);
+        
+        function animateEffects() {
+            time += 0.012;
+            // 动态光源移动
+            movingLight.position.x = 2.2 + Math.sin(time * 0.7) * 1.2;
+            movingLight.position.z = 2.5 + Math.cos(time * 0.5) * 1.5;
+            movingLight.intensity = 0.55 + Math.sin(time * 1.2) * 0.2;
+            
+            movingLight2.position.x = -1.8 + Math.cos(time * 0.9) * 1.3;
+            movingLight2.position.z = 1.8 + Math.sin(time * 0.8) * 1.2;
+            movingLight2.intensity = 0.5 + Math.cos(time * 1.5) * 0.15;
+            
+            backLight.intensity = 0.55 + Math.sin(time * 0.6) * 0.1;
+            
+            // 方块材质呼吸
+            const pulseMain = 0.07 + Math.sin(time * 1.4) * 0.04;
+            const pulseAttach = 0.13 + Math.sin(time * 2.0) * 0.08;
+            
+            mainBlocks.forEach(block => {
+                if (block.material) block.material.emissiveIntensity = pulseMain;
+            });
+            breathBlocks.forEach(block => {
+                if (block.material) block.material.emissiveIntensity = pulseAttach;
+            });
+            
+            const col5Main = allBlocks.find(b => b.position.x === 0 && Math.abs(b.position.y - 4*g) < 0.1 && b.position.z === 0);
+            if (col5Main && col5Main.material) col5Main.material.emissiveIntensity = pulseAttach + 0.02;
+            
+            stars.rotation.y = time * 0.05;
+            stars.rotation.x = Math.sin(time * 0.1) * 0.1;
+        }
+        
+        // ========= 轨道控制：实现360度无限制旋转，鼠标拖拽可无限循环 =========
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;          // 惯性效果
+        controls.dampingFactor = 0.06;
+        controls.rotateSpeed = 1.2;             // 旋转速度
+        controls.zoomSpeed = 1.2;
+        controls.panSpeed = 0.9;
+        controls.screenSpacePanning = false;    // 平移时保持水平/垂直
+        
+        // 关键设置：解除垂直角度限制，实现完全360度（上下左右无边界）
+        controls.minPolarAngle = 0;              // 允许完全向上 (0弧度)
+        controls.maxPolarAngle = Math.PI;        // 允许完全向下 (PI弧度)，实现翻转
+        
+        // 水平方向默认无限制，无需额外设置
+        // 使得鼠标向任意方向拖拽时，视角可以无限旋转（循环）
+        
+        // 可选：禁用自动旋转，纯手动交互
+        controls.autoRotate = false;
+        
+        // 设置相机初始目标点
+        controls.target.set(0, 3.2, 0);
+        
+        // 渲染循环
+        function render() {
+            requestAnimationFrame(render);
+            animateEffects();
+            controls.update(); // 更新轨道控制，支持无限旋转
+            renderer.render(scene, camera);
+        }
+        
+        render();
+        
+        // 窗口适配
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        console.log('三维拼图已启动 | 方块尺寸增大1/2 | 无限制360度旋转 | 渐变光影动态渲染 | 无编号/无文字');
+    </script>
+</body>
+</html>
